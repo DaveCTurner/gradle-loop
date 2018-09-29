@@ -52,7 +52,7 @@ runUntilFailure writeLog args = loop
     (exitCode, (), ()) <- runResourceT $
       sourceProcessWithStreams
         (proc "./gradlew" args)
-          { new_session   = True
+          { new_session   = False
           , delegate_ctlc = True
           }
         (return ()) -- stdin
