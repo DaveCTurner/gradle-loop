@@ -10,6 +10,9 @@ description:         Please see the README on GitHub at <https://github.com/dave
 
 dependencies:
 - base >= 4.7 && < 5
+- conduit
+- conduit-extra
+- resourcet
 
 executables:
   gradle-loop:
