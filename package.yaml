@@ -13,6 +13,9 @@ dependencies:
 - conduit
 - conduit-extra
 - resourcet
+- time
+- bytestring
+- iso8601-time
 
 executables:
   gradle-loop:
