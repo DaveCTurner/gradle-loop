@@ -16,6 +16,7 @@ dependencies:
 - time
 - bytestring
 - iso8601-time
+- directory
 
 executables:
   gradle-loop:

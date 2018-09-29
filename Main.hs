@@ -13,11 +13,14 @@ import System.IO
 import Text.Printf
 import qualified Data.ByteString as B
 import Data.Time.ISO8601
+import System.Directory
+import Control.Monad
 
 main :: IO ()
 main = do
   args <- getArgs
   withFile "gradle-loop.log" AppendMode $ \hLog -> do
+    hSetBuffering hLog LineBuffering
     logAndPrint hLog $ "starting with " ++ show args
     runUntilFailure (logAndPrint hLog) args
 
@@ -56,11 +59,14 @@ runUntilFailure writeLog args = loop
           , delegate_ctlc = True
           }
         (return ()) -- stdin
-        (sinkFile "testoutput-stdout.log")
-        (sinkFile "testoutput-stderr.log")
+        (sinkFile "testoutput-stdout-wip.log")
+        (sinkFile "testoutput-stderr-wip.log")
 
     endTime <- getCurrentTime
     writeLog $ printf "finished with %s in %s" (show exitCode) (show $ diffUTCTime endTime startTime)
+
+    forM_ ["stdout", "stderr"] $ \fd -> renameFile ("testoutput-" ++ fd ++ "-wip.log") ("testoutput-" ++ fd ++ ".log")
+
     case exitCode of
       ExitSuccess -> loop
       _           -> do
