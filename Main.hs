@@ -61,7 +61,10 @@ runUntilFailure writeLog args = loop
           }
         (return ()) -- stdin
         (sinkFile "testoutput-stdout-wip.log")
-        (sinkFile "testoutput-stderr-wip.log")
+        (DCC.linesUnboundedAscii
+          .| collectReproduceWith
+          .| DCC.unlinesAscii
+          .| sinkFile "testoutput-stderr-wip.log")
 
     endTime <- getCurrentTime
     writeLog $ printf "finished with %s in %s" (show exitCode) (show $ diffUTCTime endTime startTime)
@@ -73,9 +76,6 @@ runUntilFailure writeLog args = loop
       _           -> do
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
-          .| DCC.linesUnboundedAscii
-          .| collectReproduceWith
-          .| DCC.unlinesAscii
           .| DCC.stdout
 
 collectReproduceWith :: Monad m => ConduitT B.ByteString B.ByteString m ()
