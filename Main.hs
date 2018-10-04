@@ -99,6 +99,12 @@ collectReproduceWith = go [] []
     breakAtTestsSeed :: B.ByteString -> (B.ByteString, B.ByteString)
     breakAtTestsSeed = B.breakSubstring testsSeedArg
 
+    testMethodSeedArg :: B.ByteString
+    testMethodSeedArg = " {seed=["
+
+    breakAtTestMethodSeedArg :: B.ByteString -> (B.ByteString, B.ByteString)
+    breakAtTestMethodSeedArg = B.breakSubstring testMethodSeedArg
+
     go fixedReproduceWithLines pendingReproduceWithLines = await >>= \case
       Nothing -> case fixedReproduceWithLines ++ pendingReproduceWithLines of
         [] -> return ()
@@ -113,8 +119,13 @@ collectReproduceWith = go [] []
           (_, Just s) -> go (fixedReproduceWithLines ++ fmap (fixReproduceWithLine s) pendingReproduceWithLines) []
           _           -> go fixedReproduceWithLines pendingReproduceWithLines
 
+    fixTestMethodName :: B.ByteString -> B.ByteString
+    fixTestMethodName cmdLine = beforeMethodSeed <> B.drop 1 (B.dropWhile (/= 0x7d) methodSeedAndAfter)
+      where
+      (beforeMethodSeed, methodSeedAndAfter) = breakAtTestMethodSeedArg cmdLine
+
     fixReproduceWithLine :: B.ByteString -> B.ByteString -> B.ByteString
-    fixReproduceWithLine seedAndJunk reproduceWithLine = beforeTestsSeed <> testsSeedArg <> seed <> after
+    fixReproduceWithLine seedAndJunk reproduceWithLine = fixTestMethodName $ beforeTestsSeed <> testsSeedArg <> seed <> after
       where
       (beforeTestsSeed, testsSeedAndAfter) = breakAtTestsSeed reproduceWithLine
       after = B.dropWhile (/= 0x20) $ B.drop (B.length testsSeedArg) testsSeedAndAfter
