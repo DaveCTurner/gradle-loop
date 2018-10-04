@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
@@ -73,5 +74,48 @@ runUntilFailure writeLog args = loop
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
           .| DCC.linesUnboundedAscii
+          .| collectReproduceWith
           .| DCC.unlinesAscii
           .| DCC.stdout
+
+collectReproduceWith :: Monad m => ConduitT B.ByteString B.ByteString m ()
+collectReproduceWith = go [] []
+  where
+    lineAfter :: B.ByteString -> B.ByteString -> Maybe B.ByteString
+    lineAfter s = dropMatch . snd . B.breakSubstring s
+      where
+        dropMatch bs | B.null bs = Nothing
+                     | otherwise = Just $ B.drop (B.length s) bs
+
+    lineAfterReproduceWith :: B.ByteString -> Maybe B.ByteString
+    lineAfterReproduceWith = lineAfter "REPRODUCE WITH: "
+
+    lineAfterSeed :: B.ByteString -> Maybe B.ByteString
+    lineAfterSeed = lineAfter "__randomizedtesting.SeedInfo.seed(["
+
+    testsSeedArg :: B.ByteString
+    testsSeedArg = " -Dtests.seed="
+
+    breakAtTestsSeed :: B.ByteString -> (B.ByteString, B.ByteString)
+    breakAtTestsSeed = B.breakSubstring testsSeedArg
+
+    go fixedReproduceWithLines pendingReproduceWithLines = await >>= \case
+      Nothing -> case fixedReproduceWithLines ++ pendingReproduceWithLines of
+        [] -> return ()
+        reproLines -> do
+          yield ""
+          yield "REPRODUCE WITH:"
+          yieldMany reproLines
+      Just l -> do
+        yield l
+        case (lineAfterReproduceWith l, lineAfterSeed l) of
+          (Just r, _) -> go fixedReproduceWithLines (pendingReproduceWithLines ++ [r])
+          (_, Just s) -> go (fixedReproduceWithLines ++ fmap (fixReproduceWithLine s) pendingReproduceWithLines) []
+          _           -> go fixedReproduceWithLines pendingReproduceWithLines
+
+    fixReproduceWithLine :: B.ByteString -> B.ByteString -> B.ByteString
+    fixReproduceWithLine seedAndJunk reproduceWithLine = beforeTestsSeed <> testsSeedArg <> seed <> after
+      where
+      (beforeTestsSeed, testsSeedAndAfter) = breakAtTestsSeed reproduceWithLine
+      after = B.dropWhile (/= 0x20) $ B.drop (B.length testsSeedArg) testsSeedAndAfter
+      seed = B.takeWhile (/= 0x5d) seedAndJunk
