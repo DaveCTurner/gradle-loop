@@ -22,7 +22,6 @@ main = do
   args <- getArgs
   withFile "gradle-loop.log" AppendMode $ \hLog -> do
     hSetBuffering hLog LineBuffering
-    logAndPrint hLog $ "starting with " ++ show args
     runUntilFailure (logAndPrint hLog) args
 
 logAndPrint :: Handle -> String -> IO ()
