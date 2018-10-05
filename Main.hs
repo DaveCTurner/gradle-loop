@@ -88,7 +88,7 @@ collectReproduceWith = go [] []
                      | otherwise = Just $ B.drop (B.length s) bs
 
     lineAfterReproduceWith :: B.ByteString -> Maybe B.ByteString
-    lineAfterReproduceWith = lineAfter "REPRODUCE WITH: "
+    lineAfterReproduceWith = lineAfter "REPRODUCE WITH: ./gradlew "
 
     lineAfterSeed :: B.ByteString -> Maybe B.ByteString
     lineAfterSeed = lineAfter "__randomizedtesting.SeedInfo.seed(["
