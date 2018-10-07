@@ -17,6 +17,9 @@ dependencies:
 - bytestring
 - iso8601-time
 - directory
+- wreq
+- text
+- aeson
 
 executables:
   gradle-loop:
