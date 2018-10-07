@@ -21,6 +21,8 @@ dependencies:
 - text
 - aeson
 
+ghc-options: -Wall -Werror
+
 executables:
   gradle-loop:
     main:                Main.hs

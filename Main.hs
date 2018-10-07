@@ -94,30 +94,31 @@ runUntilFailure onFailure writeLog args = loop
                                                    ("testoutput-" ++ fd ++ ".log")
 
     case exitCode of
-      ExitSuccess -> loop
-      _           -> do
+      ExitSuccess   -> loop
+      ExitFailure c -> do
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
           .| DCC.stdout
 
-        notificationMessageLines <- runResourceT $ runConduit $ (.| (DCC.unlinesAscii .| DCL.consume)) $ do
-          sourceFile "testoutput-stderr.log"
-            .| DCC.linesUnboundedAscii
-            .| do DCC.dropWhile (/= "REPRODUCE WITH:")
-                  DCC.drop 1
-                  yield "```"
-                  awaitForever yield
-                  yield "```"
-                  yield "Error output follows:"
-                  yield "```"
+        when (c < 128) $ do
+          notificationMessageLines <- runResourceT $ runConduit $ (.| (DCC.unlinesAscii .| DCL.consume)) $ do
+            sourceFile "testoutput-stderr.log"
+              .| DCC.linesUnboundedAscii
+              .| do DCC.dropWhile (/= "REPRODUCE WITH:")
+                    DCC.drop 1
+                    yield "```"
+                    awaitForever yield
+                    yield "```"
+                    yield "Error output follows:"
+                    yield "```"
 
-          sourceFile "testoutput-stderr.log"
-            .| DCC.linesUnboundedAscii
-            .| DCC.take 30
+            sourceFile "testoutput-stderr.log"
+              .| DCC.linesUnboundedAscii
+              .| DCC.take 30
 
-          yield "```"
+            yield "```"
 
-        onFailure gitRevision $ B.concat notificationMessageLines
+          onFailure gitRevision $ B.concat notificationMessageLines
 
 collectReproduceWith :: Monad m => ConduitT B.ByteString B.ByteString m ()
 collectReproduceWith = go [] []
