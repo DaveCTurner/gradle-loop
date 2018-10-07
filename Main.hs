@@ -27,9 +27,6 @@ main :: IO ()
 main = do
   args <- getArgs
   onFailure <- getOnFailureHandler
-
-  exitWith ExitSuccess
-
   withFile "gradle-loop.log" AppendMode $ \hLog -> do
     hSetBuffering hLog LineBuffering
     runUntilFailure onFailure (logAndPrint hLog) args
