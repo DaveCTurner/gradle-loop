@@ -67,11 +67,11 @@ getGitRevision = do
     _                              -> "unknown"
 
 runUntilFailure :: (B.ByteString -> B.ByteString -> IO ()) -> (String -> IO ()) -> [String] -> IO ()
-runUntilFailure onFailure writeLog args = loop
+runUntilFailure onFailure writeLog args = loop (0::Int)
   where
-  loop = do
+  loop iteration = do
     gitRevision <- getGitRevision
-    writeLog $ printf "starting on revision %s with args %s" (show gitRevision) (show args)
+    writeLog $ printf "[%4d] starting on %s with args %s" iteration (show gitRevision) (show args)
 
     startTime <- getCurrentTime
     (exitCode, (), ()) <- runResourceT $
@@ -88,13 +88,13 @@ runUntilFailure onFailure writeLog args = loop
           .| sinkFile "testoutput-stderr-wip.log")
 
     endTime <- getCurrentTime
-    writeLog $ printf "finished with %s in %s" (show exitCode) (show $ diffUTCTime endTime startTime)
+    writeLog $ printf "[%4d] finished with %s in %s" iteration (show exitCode) (show $ diffUTCTime endTime startTime)
 
     forM_ ["stdout", "stderr"] $ \fd -> renameFile ("testoutput-" ++ fd ++ "-wip.log") 
                                                    ("testoutput-" ++ fd ++ ".log")
 
     case exitCode of
-      ExitSuccess   -> loop
+      ExitSuccess   -> loop (iteration + 1)
       ExitFailure c -> do
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
