@@ -115,6 +115,8 @@ runUntilFailure onFailure writeLog args = loop (0::Int)
             sourceFile "testoutput-stderr.log"
               .| DCC.linesUnboundedAscii
               .| DCC.take 30
+              .| DCC.unlinesAscii
+              .| DCC.takeE 3500
 
             yield "```"
 
