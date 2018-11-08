@@ -101,24 +101,27 @@ runUntilFailure onFailure writeLog args = loop (0::Int)
           .| DCC.stdout
 
         when (c < 128) $ do
-          notificationMessageLines <- runResourceT $ runConduit $ (.| (DCC.unlinesAscii .| DCL.consume)) $ do
-            sourceFile "testoutput-stderr.log"
-              .| DCC.linesUnboundedAscii
-              .| do DCC.dropWhile (/= "REPRODUCE WITH:")
-                    DCC.drop 1
-                    yield "```"
-                    awaitForever yield
-                    yield "```"
-                    yield "Error output follows:"
-                    yield "```"
+          notificationMessageLines <- runResourceT $ runConduit $
+            do  sourceFile "testoutput-stderr.log"
+                  .| DCC.linesUnboundedAscii
+                  .| do DCC.dropWhile (/= "REPRODUCE WITH:")
+                        DCC.drop 1
+                        yield "```"
+                        DCC.take 5
+                        yield "```"
+                        yield "Error output follows:"
+                        yield "```"
+                  .| DCC.unlinesAscii
 
-            sourceFile "testoutput-stderr.log"
-              .| DCC.linesUnboundedAscii
-              .| DCC.take 30
-              .| DCC.unlinesAscii
-              .| DCC.takeE 3500
+                sourceFile "testoutput-stderr.log"
+                  .| DCC.linesUnboundedAscii
+                  .| DCC.take 30
+                  .| DCC.unlinesAscii
+                  .| DCC.takeE 3500
 
-            yield "```"
+                yield "```"
+
+            .| DCL.consume
 
           onFailure gitRevision $ B.concat notificationMessageLines
 
