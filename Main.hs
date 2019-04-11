@@ -76,7 +76,7 @@ runUntilFailure onFailure writeLog args = loop (0::Int)
     startTime <- getCurrentTime
     (exitCode, (), ()) <- runResourceT $
       sourceProcessWithStreams
-        (proc "./gradlew" args)
+        (proc "./gradlew" $ ("-Dtests.gradle-loop-iteration=" ++ show iteration) : args)
           { new_session   = False
           , delegate_ctlc = True
           }
