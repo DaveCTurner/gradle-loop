@@ -66,12 +66,32 @@ getGitRevision = do
     (ExitSuccess, Just gitRev, ()) -> gitRev
     _                              -> "unknown"
 
+resetGitBranch :: String -> IO ()
+resetGitBranch rev = do
+  (exitCode, (), ()) <- runResourceT $
+    sourceProcessWithStreams
+        (proc "git" ["reset", "--hard", rev])
+        (return ())
+        (awaitForever $ const $ return ())
+        (return ())
+  case exitCode of
+    ExitSuccess -> return ()
+    _ -> error $ "failed: git reset --hard " ++ rev
+
 runUntilFailure :: (B.ByteString -> B.ByteString -> IO ()) -> (String -> IO ()) -> [String] -> IO ()
 runUntilFailure onFailure writeLog args = loop (0::Int)
   where
   loop iteration = do
+    maybeBranch <- lookupEnv "BRANCH"
+    branchDescription <- case maybeBranch of
+        Nothing -> return ""
+        Just branch -> do
+            let rev = "origin/" ++ branch
+            resetGitBranch rev
+            return $ show rev ++ " = "
+
     gitRevision <- getGitRevision
-    writeLog $ printf "[%4d] starting on %s with args %s" iteration (show gitRevision) (show args)
+    writeLog $ printf "[%4d] starting on %s%s with args %s" iteration branchDescription (show gitRevision) (show args)
 
     startTime <- getCurrentTime
     (exitCode, (), ()) <- runResourceT $
