@@ -79,9 +79,9 @@ resetGitBranch rev = do
     _ -> error $ "failed: git reset --hard " ++ rev
 
 runUntilFailure :: (B.ByteString -> B.ByteString -> IO ()) -> (String -> IO ()) -> [String] -> IO ()
-runUntilFailure onFailure writeLog args = loop (0::Int)
+runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
   where
-  loop iteration = do
+  loop iteration maybePreviousGitRevision = do
     maybeBranch <- lookupEnv "BRANCH"
     branchDescription <- case maybeBranch of
         Nothing -> return ""
@@ -93,28 +93,40 @@ runUntilFailure onFailure writeLog args = loop (0::Int)
     gitRevision <- getGitRevision
     writeLog $ printf "[%4d] starting on %s%s with args %s" iteration branchDescription (show gitRevision) (show args)
 
-    startTime <- getCurrentTime
-    (exitCode, (), ()) <- runResourceT $
-      sourceProcessWithStreams
-        (proc "./gradlew" $ ("-Dtests.gradle-loop-iteration=" ++ show iteration) : args)
-          { new_session   = False
-          , delegate_ctlc = True
-          }
-        (return ()) -- stdin
-        (sinkFile "testoutput-stdout-wip.log")
-        (DCC.linesUnboundedAscii
-          .| collectReproduceWith
-          .| DCC.unlinesAscii
-          .| sinkFile "testoutput-stderr-wip.log")
+    {-
+        If $GRADLE_LOOP_STRESSOR command is present, run it via "sh -c 'exec $GRADLE_LOOP_STRESSOR'".
+        Only do this if the git revision is unchanged from the last time because if the git revision
+        changes then we must recompile things.
+        Use 'exec' to replace the sh process with the actual stressor so that it receives a SIGTERM
+        when Gradle completes
+    -}
+    runWithStressor <- let getStressor = if maybePreviousGitRevision == Just gitRevision then lookupEnv "GRADLE_LOOP_STRESSOR" else return Nothing
+      in maybe id (\stressor c -> withCreateProcess (shell $ "exec " ++ stressor) $ \_ _ _ _ -> c) <$> getStressor
 
-    endTime <- getCurrentTime
-    writeLog $ printf "[%4d] finished with %s in %s" iteration (show exitCode) (show $ diffUTCTime endTime startTime)
+    exitCode <- runWithStressor $ do
+      startTime <- getCurrentTime
+      (exitCode, (), ()) <- runResourceT $
+        sourceProcessWithStreams
+          (proc "./gradlew" $ ("-Dtests.gradle-loop-iteration=" ++ show iteration) : args)
+            { new_session   = False
+            , delegate_ctlc = True
+            }
+          (return ()) -- stdin
+          (sinkFile "testoutput-stdout-wip.log")
+          (DCC.linesUnboundedAscii
+            .| collectReproduceWith
+            .| DCC.unlinesAscii
+            .| sinkFile "testoutput-stderr-wip.log")
+
+      endTime <- getCurrentTime
+      writeLog $ printf "[%4d] finished with %s in %s" iteration (show exitCode) (show $ diffUTCTime endTime startTime)
+      return exitCode
 
     forM_ ["stdout", "stderr"] $ \fd -> renameFile ("testoutput-" ++ fd ++ "-wip.log") 
                                                    ("testoutput-" ++ fd ++ ".log")
 
     case exitCode of
-      ExitSuccess   -> loop (iteration + 1)
+      ExitSuccess   -> loop (iteration + 1) (Just gitRevision)
       ExitFailure c -> do
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
