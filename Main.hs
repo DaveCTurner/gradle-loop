@@ -70,7 +70,7 @@ resetGitBranch :: String -> IO ()
 resetGitBranch rev = do
   (exitCode, (), ()) <- runResourceT $
     sourceProcessWithStreams
-        (proc "git" ["reset", "--hard", rev])
+        (proc "git" ["reset", "--hard", "--recurse-submodules", rev])
         (return ())
         (awaitForever $ const $ return ())
         (return ())
