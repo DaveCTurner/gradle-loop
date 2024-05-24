@@ -103,8 +103,8 @@ runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
     runWithStressor <- let getStressor = if maybePreviousGitRevision == Just gitRevision then lookupEnv "GRADLE_LOOP_STRESSOR" else return Nothing
       in maybe id (\stressor c -> withCreateProcess (shell $ "exec " ++ stressor) $ \_ _ _ _ -> c) <$> getStressor
 
+    startTime <- getCurrentTime
     exitCode <- runWithStressor $ do
-      startTime <- getCurrentTime
       (exitCode, (), ()) <- runResourceT $
         sourceProcessWithStreams
           (proc "./gradlew" $ ("-Dtests.gradle-loop-iteration=" ++ show iteration) : args)
@@ -128,6 +128,9 @@ runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
     case exitCode of
       ExitSuccess   -> loop (iteration + 1) (Just gitRevision)
       ExitFailure c -> do
+        writeLog $ printf "tar cvf testoutput-%s.tar --force-local --transform 's/^testoutput-/testoutput-%s-/' testoutput-std{out,err}.log"
+                    (formatISO8601Millis startTime)
+                    (formatISO8601Millis startTime)
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
           .| DCC.stdout
