@@ -128,7 +128,7 @@ runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
     case exitCode of
       ExitSuccess   -> loop (iteration + 1) (Just gitRevision)
       ExitFailure c -> do
-        writeLog $ printf "tar zcvf testoutput-%s.tar.gz --force-local --transform 's/^testoutput-/testoutput-%s-/' testoutput-std*.log"
+        writeLog $ printf "tar zcvf testoutput-%s.tar.gz --force-local --transform 's/^/testoutput-%s\\//' testoutput-std*.log"
                     (formatISO8601Millis startTime)
                     (formatISO8601Millis startTime)
         runResourceT $ runConduit
