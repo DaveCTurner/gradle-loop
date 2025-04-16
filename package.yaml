@@ -20,6 +20,7 @@ dependencies:
 - wreq
 - text
 - aeson
+- process
 
 ghc-options: -Wall -Werror
 

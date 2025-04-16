@@ -22,6 +22,7 @@ import System.Directory
 import Control.Monad
 import Network.Wreq
 import Data.Aeson
+import qualified System.Process as SP
 
 main :: IO ()
 main = do
@@ -92,6 +93,11 @@ runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
 
     gitRevision <- getGitRevision
     writeLog $ printf "[%4d] starting on %s%s with args %s" iteration branchDescription (show gitRevision) (show args)
+
+    maybePreCleanCommand <- lookupEnv "GRADLE_LOOP_PRECLEAN"
+    case maybePreCleanCommand of
+      Nothing -> return ()
+      Just preCleanCommand -> SP.callCommand preCleanCommand
 
     {-
         If $GRADLE_LOOP_STRESSOR command is present, run it via "sh -c 'exec $GRADLE_LOOP_STRESSOR'".
