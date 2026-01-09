@@ -17,9 +17,6 @@ dependencies:
 - bytestring
 - iso8601-time
 - directory
-- wreq
-- text
-- aeson
 - process
 
 ghc-options: -Wall -Werror

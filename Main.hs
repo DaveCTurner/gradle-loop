@@ -7,45 +7,23 @@ import System.Environment
 import Data.Conduit
 import Data.Conduit.Process
 import Data.Conduit.Combinators as DCC
-import Data.Conduit.List as DCL
 import Control.Monad.Trans.Resource
 import System.Exit
 import Data.Time
 import System.IO
 import Text.Printf
 import qualified Data.ByteString as B
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
 import Data.Time.ISO8601
 import System.Directory
 import Control.Monad
-import Network.Wreq
-import Data.Aeson
 import qualified System.Process as SP
 
 main :: IO ()
 main = do
   args <- getArgs
-  onFailure <- getOnFailureHandler
   withFile "gradle-loop.log" AppendMode $ \hLog -> do
     hSetBuffering hLog LineBuffering
-    runUntilFailure onFailure (logAndPrint hLog) args
-
-getOnFailureHandler :: IO (B.ByteString -> B.ByteString -> IO ())
-getOnFailureHandler = do
-  maybeSlackWebhookUser <- lookupEnv "GRADLE_LOOP_SLACK_WEBHOOK_USER"
-  maybeSlackWebhookUri  <- lookupEnv "GRADLE_LOOP_SLACK_WEBHOOK_URI"
-  case (maybeSlackWebhookUser, maybeSlackWebhookUri) of
-    (Just slackWebhookUser, Just slackWebhookUri) -> return $ \gitRevision bs -> void $ post slackWebhookUri $ object
-      [ "text" .= String ("<" <> T.pack slackWebhookUser <> "> tests failed on `"
-        <> T.decodeUtf8With T.lenientDecode gitRevision
-        <> "`, use these args to reproduce:"
-        <> T.decodeUtf8With T.lenientDecode bs)
-      ]
-    _ -> do
-      putStrLn "GRADLE_LOOP_SLACK_WEBHOOK_USER or GRADLE_LOOP_SLACK_WEBHOOK_URI unset, notifications disabled"
-      return $ \_ _ -> return ()
+    runUntilFailure (logAndPrint hLog) args
 
 logAndPrint :: Handle -> String -> IO ()
 logAndPrint h msg = do
@@ -79,8 +57,8 @@ resetGitBranch rev = do
     ExitSuccess -> return ()
     _ -> error $ "failed: git reset --hard " ++ rev
 
-runUntilFailure :: (B.ByteString -> B.ByteString -> IO ()) -> (String -> IO ()) -> [String] -> IO ()
-runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
+runUntilFailure :: (String -> IO ()) -> [String] -> IO ()
+runUntilFailure writeLog args = loop (0::Int) Nothing
   where
   loop iteration maybePreviousGitRevision = do
     maybeBranch <- lookupEnv "BRANCH"
@@ -133,38 +111,13 @@ runUntilFailure onFailure writeLog args = loop (0::Int) Nothing
 
     case exitCode of
       ExitSuccess   -> loop (iteration + 1) (Just gitRevision)
-      ExitFailure c -> do
+      ExitFailure _ -> do
         writeLog $ printf "tar zcvf testoutput-%s.tar.gz --force-local --transform 's/^/testoutput-%s\\//' testoutput-std*.log"
                     (formatISO8601Millis startTime)
                     (formatISO8601Millis startTime)
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
           .| DCC.stdout
-
-        when (c < 128) $ do
-          notificationMessageLines <- runResourceT $ runConduit $
-            do  sourceFile "testoutput-stderr.log"
-                  .| DCC.linesUnboundedAscii
-                  .| do DCC.dropWhile (/= "REPRODUCE WITH:")
-                        DCC.drop 1
-                        yield "```"
-                        DCC.take 5
-                        yield "```"
-                        yield "Error output follows:"
-                        yield "```"
-                  .| DCC.unlinesAscii
-
-                sourceFile "testoutput-stderr.log"
-                  .| DCC.linesUnboundedAscii
-                  .| DCC.take 30
-                  .| DCC.unlinesAscii
-                  .| DCC.takeE 3500
-
-                yield "```"
-
-            .| DCL.consume
-
-          onFailure gitRevision $ B.concat notificationMessageLines
 
 collectReproduceWith :: Monad m => ConduitT B.ByteString B.ByteString m ()
 collectReproduceWith = go [] []
