@@ -148,10 +148,8 @@ runBayesianBisection bisectState args = do
         then do
           proposedRuns <- (\BisectCommitState{..} -> _bisectCommitSuccesses + _bisectCommitFailures) <$> readArray (_bisectStateCommits bisectState) proposedCommitIndex
           otherRuns <- (sum . drop (proposedCommitIndex + 1) . map _bisectCommitSuccesses) <$> getElems (_bisectStateCommits bisectState)
-          print $ "known-bad has " ++ show proposedRuns ++ " vs earlier commits with " ++ show otherRuns
           return $ if div otherRuns 10 <= div proposedRuns 10 then proposedCommitIndex + 1 else proposedCommitIndex
         else return proposedCommitIndex
-      print (target/total, commitIndex, map (/total) cumulativeDistribution)
       bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
