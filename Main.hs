@@ -19,7 +19,6 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.IO
-import System.Random
 import Text.Printf
 
 import qualified Data.Conduit.Combinators as DCC
@@ -115,7 +114,6 @@ main = do
       return ()
 
 -- implements https://davecturner.github.io/2024/11/11/bayesian-bisection.html except:
--- picks commit randomly according to distribution, rather than always picking median
 -- keeps trying known-bad commit to get a better sense of failure rate, but only if
 -- the number of runs on that commit is less than the number of runs on the
 -- believed-good commits (div 10, so we try each commit multiple times before switching)
@@ -146,7 +144,7 @@ runBayesianBisection bisectState args = do
       let total = sum $ elems distribution
           cumulativeDistribution = scanl (+) 0.0 $ elems distribution
       (_,ub) <- getBounds (_bisectStateCommits bisectState)
-      target <- randomRIO (0.0, total)
+      let target = total / 2.0
       let proposedCommitIndex = min ub $ length $ filter (<target) cumulativeDistribution
           proposedKnownBad = all (==0.0) $ take proposedCommitIndex cumulativeDistribution
       commitIndex <- if proposedKnownBad && proposedCommitIndex < ub
