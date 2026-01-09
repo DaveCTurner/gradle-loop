@@ -10,14 +10,18 @@ description:         Please see the README on GitHub at <https://github.com/dave
 
 dependencies:
 - base >= 4.7 && < 5
+- aeson
+- array
+- bytestring
 - conduit
 - conduit-extra
-- resourcet
-- time
-- bytestring
-- iso8601-time
 - directory
+- iso8601-time
 - process
+- random
+- resourcet
+- text
+- time
 
 ghc-options: -Wall -Werror
 

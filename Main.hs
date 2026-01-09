@@ -1,30 +1,164 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
-import System.Environment
-import Data.Conduit
-import Data.Conduit.Process
-import Data.Conduit.Combinators as DCC
+import Control.Monad
 import Control.Monad.Trans.Resource
-import System.Exit
+import Data.Aeson
+import Data.Array.IO
+import Data.Array.Unboxed
+import Data.Conduit
+import Data.Conduit.Combinators as DCC (sourceFile, sinkFile, yieldMany)
+import Data.Conduit.Process
+import Data.IORef
 import Data.Time
-import System.IO
-import Text.Printf
-import qualified Data.ByteString as B
 import Data.Time.ISO8601
 import System.Directory
-import Control.Monad
+import System.Environment
+import System.Exit
+import System.IO
+import System.Random
+import Text.Printf
+
+import qualified Data.Conduit.Combinators as DCC
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.ByteString as B
 import qualified System.Process as SP
+
+bisectCandidatesFile :: FilePath
+bisectCandidatesFile = "gradle-loop-bisect-candidates.txt"
+
+bisectHistoryFile :: FilePath
+bisectHistoryFile = "gradle-loop-bisect-history.json"
+
+data BisectHistoryEntry = BisectHistoryEntry
+  { _bisectHistoryEntryCommit    :: String
+  , _bisectHistoryEntrySuccesses :: Int
+  , _bisectHistoryEntryFailures  :: Int
+  } deriving (Show, Eq)
+
+instance ToJSON BisectHistoryEntry where
+  toJSON BisectHistoryEntry{..} = object
+    [ "commit"    .= _bisectHistoryEntryCommit
+    , "successes" .= _bisectHistoryEntrySuccesses
+    , "failures"  .= _bisectHistoryEntryFailures
+    ]
+
+instance FromJSON BisectHistoryEntry where
+   parseJSON = withObject "BisectHistoryEntry" $ \v -> BisectHistoryEntry
+        <$> v .: "commit"
+        <*> v .: "successes"
+        <*> v .: "failures"
+
+data BisectCommitState = BisectCommitState
+  { _bisectCommitIndex     :: Int
+  , _bisectCommit          :: String
+  , _bisectCommitSuccesses :: Int
+  , _bisectCommitFailures  :: Int
+  } deriving (Show, Eq)
+
+data BisectState = BisectState
+  { _bisectStateCommits :: IOArray Int BisectCommitState
+  , _bisectCurrentCommit :: IORef (Maybe BisectCommitState)
+  }
+
+getHistoryEntries :: BisectState -> IO [BisectHistoryEntry]
+getHistoryEntries BisectState{..} = map historyEntryFromState <$> getElems _bisectStateCommits
+  where
+    historyEntryFromState BisectCommitState{..} = BisectHistoryEntry _bisectCommit _bisectCommitSuccesses _bisectCommitFailures
+
+writeBisectState :: BisectState -> IO ()
+writeBisectState bisectState = encodeFile bisectHistoryFile =<< getHistoryEntries bisectState
+
+printBisectState :: BisectState -> IO ()
+printBisectState bisectState = mapM_ (putStrLn . show) =<< getAssocs (_bisectStateCommits bisectState)
+
+loadBisectState :: [String] -> IO BisectState
+loadBisectState commits = do
+  hasBisectState <- doesFileExist bisectHistoryFile
+  historyEntries <- if hasBisectState
+    then do
+      Just historyEntries <- decodeFileStrict bisectHistoryFile
+      unless (map _bisectHistoryEntryCommit historyEntries == commits) $ error $ "mismatch between " ++ bisectHistoryFile ++ " and " ++ bisectCandidatesFile
+      return historyEntries
+    else
+      return  [ BisectHistoryEntry c 0 0 | c <- commits ]
+  BisectState
+    <$> newListArray (0, length commits - 1)
+          [ BisectCommitState i _bisectHistoryEntryCommit _bisectHistoryEntrySuccesses _bisectHistoryEntryFailures
+          | (i, BisectHistoryEntry{..}) <- zip [0..] historyEntries
+          ]
+    <*> newIORef Nothing
 
 main :: IO ()
 main = do
   args <- getArgs
-  commitSelector <- makeCommitSelector
-  withFile "gradle-loop.log" AppendMode $ \hLog -> do
-    hSetBuffering hLog LineBuffering
-    runUntilFailure commitSelector (logAndPrint hLog) args
+
+  hasBisectCandidates <- doesFileExist bisectCandidatesFile
+  if hasBisectCandidates
+    then do
+      putStrLn $ "running Bayesian bisection using " ++ bisectCandidatesFile ++ " and " ++ bisectHistoryFile
+      commits <- runResourceT $ sourceToList
+        $  sourceFile bisectCandidatesFile
+        .| DCC.linesUnboundedAscii
+        .| DCC.map (B.takeWhile (/= 0x20))
+        .| DCC.filter ((== 40) . B.length)
+        .| DCC.map (T.unpack . T.decodeUtf8)
+      bisectState <- loadBisectState commits
+      runBayesianBisection bisectState args
+    else do
+      commitSelector <- makeCommitSelector
+      _ <- logRunUntilFailure commitSelector args
+      return ()
+
+runBayesianBisection :: BisectState -> [String] -> IO ()
+runBayesianBisection bisectState args = do
+  exitCode <- logRunUntilFailure commitSelector args
+  if 128 <= exitCode
+    then return () -- exit on a signal, not a failure
+    else do
+      maybeCurrentCommit <- readIORef (_bisectCurrentCommit bisectState)
+      case maybeCurrentCommit of
+        Nothing -> error "failed without setting current commit"
+        Just currentCommit -> do
+          writeIORef (_bisectCurrentCommit bisectState) Nothing
+          modifyArray (_bisectStateCommits bisectState) (_bisectCommitIndex currentCommit) (\bcs@BisectCommitState{..} -> bcs {_bisectCommitFailures = _bisectCommitFailures + 1})
+          writeBisectState bisectState
+          runBayesianBisection bisectState args
+
+  where
+    commitSelector = do
+      maybeCurrentCommit <- readIORef (_bisectCurrentCommit bisectState)
+      case maybeCurrentCommit of
+        Nothing -> return ()
+        Just currentCommit -> do
+          modifyArray (_bisectStateCommits bisectState) (_bisectCommitIndex currentCommit) (\bcs@BisectCommitState{..} -> bcs {_bisectCommitSuccesses = _bisectCommitSuccesses + 1})
+          writeBisectState bisectState
+      distribution <- getPosteriorDistribution bisectState
+      let total = sum $ elems distribution
+          cumulativeDistribution = scanl (+) 0.0 $ elems distribution
+      (_,ub) <- getBounds (_bisectStateCommits bisectState)
+      target <- randomRIO (0.0, total)
+      let commitIndex = min ub $ length $ filter (<target) cumulativeDistribution
+      print (target/total, commitIndex, map (/total) cumulativeDistribution)
+      bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
+      resetGitBranch _bisectCommit
+      writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
+      return $ "bisect index " ++ show commitIndex ++ ": "
+
+getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
+getPosteriorDistribution bisectState = do
+  _elems <- getElems (_bisectStateCommits bisectState)
+  let cumulativeFailures  = drop 1 (scanr (+) 0 $ map _bisectCommitFailures _elems) ++ [0]
+      loop1 [] = []
+      loop1 ((failuresAccr, _):es) = if failuresAccr > 0 then 0.0 : loop1 es else 1.0 : loop2 1.0 es
+      loop2 _ [] = []
+      loop2 p ((_,successes):es) = let p' = p * product (replicate successes 0.9) in p' : loop2 p' es
+  (lb,ub) <- getBounds (_bisectStateCommits bisectState)
+  return $ array (lb,ub) [ (ix, p) | (ix, p) <- zip [lb..ub] $ loop1 $ zip cumulativeFailures $ map _bisectCommitSuccesses _elems ]
 
 logAndPrint :: Handle -> String -> IO ()
 logAndPrint h msg = do
@@ -70,7 +204,12 @@ makeCommitSelector = do
         resetGitBranch rev
         return description
 
-runUntilFailure :: IO String -> (String -> IO ()) -> [String] -> IO ()
+logRunUntilFailure :: IO String -> [String] -> IO Int
+logRunUntilFailure commitSelector args = withFile "gradle-loop.log" AppendMode $ \hLog -> do
+  hSetBuffering hLog LineBuffering
+  runUntilFailure commitSelector (logAndPrint hLog) args
+
+runUntilFailure :: IO String -> (String -> IO ()) -> [String] -> IO Int
 runUntilFailure commitSelector writeLog args = loop (0::Int) Nothing
   where
   loop iteration maybePreviousGitRevision = do
@@ -118,13 +257,14 @@ runUntilFailure commitSelector writeLog args = loop (0::Int) Nothing
 
     case exitCode of
       ExitSuccess   -> loop (iteration + 1) (Just gitRevision)
-      ExitFailure _ -> do
+      ExitFailure c -> do
         writeLog $ printf "tar zcvf testoutput-%s.tar.gz --force-local --transform 's/^/testoutput-%s\\//' testoutput-std*.log"
                     (formatISO8601Millis startTime)
                     (formatISO8601Millis startTime)
         runResourceT $ runConduit
           $  sourceFile "testoutput-stderr.log"
           .| DCC.stdout
+        return c
 
 collectReproduceWith :: Monad m => ConduitT B.ByteString B.ByteString m ()
 collectReproduceWith = go [] []
