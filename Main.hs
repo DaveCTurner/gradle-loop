@@ -114,6 +114,11 @@ main = do
       _ <- logRunUntilFailure commitSelector args
       return ()
 
+-- implements https://davecturner.github.io/2024/11/11/bayesian-bisection.html except:
+-- picks commit randomly according to distribution, rather than always picking median
+-- keeps trying known-bad commit to get a better sense of failure rate, but only if
+-- the number of runs on that commit is less than the number of runs on the
+-- believed-good commits (div 10, so we try each commit multiple times before switching)
 runBayesianBisection :: BisectState -> [String] -> IO ()
 runBayesianBisection bisectState args = do
   exitCode <- logRunUntilFailure commitSelector args
