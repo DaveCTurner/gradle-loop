@@ -170,7 +170,7 @@ getPosteriorDistribution bisectState = do
       loop1 [] = []
       loop1 ((failuresAccr, _):es) = if failuresAccr > 0 then 0.0 : loop1 es else 1.0 : loop2 1.0 es
       loop2 _ [] = []
-      loop2 p ((_,successes):es) = let p' = p * product (replicate successes 0.9) in p' : loop2 p' es
+      loop2 p ((_,successes):es) = let p' = p * product (replicate successes 0.95) in p' : loop2 p' es
   (lb,ub) <- getBounds (_bisectStateCommits bisectState)
   return $ array (lb,ub) [ (ix, p) | (ix, p) <- zip [lb..ub] $ loop1 $ zip cumulativeFailures $ map _bisectCommitSuccesses _elems ]
 
