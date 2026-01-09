@@ -21,9 +21,10 @@ import qualified System.Process as SP
 main :: IO ()
 main = do
   args <- getArgs
+  commitSelector <- makeCommitSelector
   withFile "gradle-loop.log" AppendMode $ \hLog -> do
     hSetBuffering hLog LineBuffering
-    runUntilFailure (logAndPrint hLog) args
+    runUntilFailure commitSelector (logAndPrint hLog) args
 
 logAndPrint :: Handle -> String -> IO ()
 logAndPrint h msg = do
@@ -57,20 +58,26 @@ resetGitBranch rev = do
     ExitSuccess -> return ()
     _ -> error $ "failed: git reset --hard " ++ rev
 
-runUntilFailure :: (String -> IO ()) -> [String] -> IO ()
-runUntilFailure writeLog args = loop (0::Int) Nothing
+makeCommitSelector :: IO (IO String)
+makeCommitSelector = do
+  maybeBranch <- lookupEnv "BRANCH"
+  case maybeBranch of
+    Nothing -> return $ return ""
+    Just branch -> do
+      let rev = "origin/" ++ branch
+          description = show rev ++ " = "
+      return $ do
+        resetGitBranch rev
+        return description
+
+runUntilFailure :: IO String -> (String -> IO ()) -> [String] -> IO ()
+runUntilFailure commitSelector writeLog args = loop (0::Int) Nothing
   where
   loop iteration maybePreviousGitRevision = do
-    maybeBranch <- lookupEnv "BRANCH"
-    branchDescription <- case maybeBranch of
-        Nothing -> return ""
-        Just branch -> do
-            let rev = "origin/" ++ branch
-            resetGitBranch rev
-            return $ show rev ++ " = "
 
+    commitDescription <- commitSelector
     gitRevision <- getGitRevision
-    writeLog $ printf "[%4d] starting on %s%s with args %s" iteration branchDescription (show gitRevision) (show args)
+    writeLog $ printf "[%4d] starting on %s%s with args %s" iteration commitDescription (show gitRevision) (show args)
 
     {-
         If $GRADLE_LOOP_PRECLEAN command is present, run it first.
