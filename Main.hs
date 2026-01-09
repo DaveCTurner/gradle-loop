@@ -22,6 +22,8 @@ import System.IO
 import Text.Printf
 
 import qualified Data.Conduit.Combinators as DCC
+import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as B
@@ -76,17 +78,19 @@ printBisectState :: BisectState -> IO ()
 printBisectState bisectState = mapM_ (putStrLn . show) =<< getAssocs (_bisectStateCommits bisectState)
 
 loadBisectState :: [String] -> IO BisectState
-loadBisectState commits = do
+loadBisectState candidateCommits = do
   hasBisectState <- doesFileExist bisectHistoryFile
-  historyEntries <- if hasBisectState
+  historyCommitsMap <- if hasBisectState
     then do
       Just historyEntries <- decodeFileStrict bisectHistoryFile
-      unless (map _bisectHistoryEntryCommit historyEntries == commits) $ error $ "mismatch between " ++ bisectHistoryFile ++ " and " ++ bisectCandidatesFile
-      return historyEntries
-    else
-      return  [ BisectHistoryEntry c 0 0 | c <- commits ]
+      let historyCommitsSet   = S.fromList $ map _bisectHistoryEntryCommit historyEntries
+          candidateCommitsSet = S.fromList candidateCommits
+      unless (historyCommitsSet `S.isSubsetOf` candidateCommitsSet) $ error $ "mismatch between " ++ bisectHistoryFile ++ " and " ++ bisectCandidatesFile
+      return $ M.fromList [(_bisectHistoryEntryCommit e, e) | e <- historyEntries]
+    else return M.empty
+  let historyEntries = map (\c -> M.findWithDefault (BisectHistoryEntry c 0 0) c historyCommitsMap) candidateCommits
   BisectState
-    <$> newListArray (0, length commits - 1)
+    <$> newListArray (0, length candidateCommits - 1)
           [ BisectCommitState i _bisectHistoryEntryCommit _bisectHistoryEntrySuccesses _bisectHistoryEntryFailures
           | (i, BisectHistoryEntry{..}) <- zip [0..] historyEntries
           ]

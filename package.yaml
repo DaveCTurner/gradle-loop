@@ -15,6 +15,7 @@ dependencies:
 - bytestring
 - conduit
 - conduit-extra
+- containers
 - directory
 - iso8601-time
 - process
