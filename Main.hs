@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Main where
 
@@ -165,14 +166,26 @@ runBayesianBisection bisectState args = do
 
 getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
 getPosteriorDistribution bisectState = do
-  _elems <- getElems (_bisectStateCommits bisectState)
-  let cumulativeFailures  = drop 1 (scanr (+) 0 $ map _bisectCommitFailures _elems) ++ [0]
+  commits <- getElems (_bisectStateCommits bisectState)
+  let pEstimateLoop1 :: [BisectCommitState] -> Double
+      pEstimateLoop1 [] = 0.9
+      pEstimateLoop1 (BisectCommitState{..}:bcs) =
+        if _bisectCommitFailures > 0
+          then pEstimateLoop2 _bisectCommitSuccesses _bisectCommitFailures bcs
+          else pEstimateLoop1 bcs
+      pEstimateLoop2 :: Int -> Int -> [BisectCommitState] -> Double
+      pEstimateLoop2 (!successAccr) (!failureAccr) [] = fromIntegral successAccr / (fromIntegral (successAccr + failureAccr))
+      pEstimateLoop2 (!successAccr) (!failureAccr) (BisectCommitState{..}:bcs) = pEstimateLoop2 (successAccr + _bisectCommitSuccesses) (failureAccr + _bisectCommitFailures) bcs
+      pSuccess :: Double
+      pSuccess = pEstimateLoop1 $ reverse commits
+
+  let cumulativeFailures  = drop 1 (scanr (+) 0 $ map _bisectCommitFailures commits)
       loop1 [] = []
       loop1 ((failuresAccr, _):es) = if failuresAccr > 0 then 0.0 : loop1 es else 1.0 : loop2 1.0 es
       loop2 _ [] = []
-      loop2 p ((_,successes):es) = let p' = p * product (replicate successes 0.95) in p' : loop2 p' es
+      loop2 p ((_,successes):es) = let p' = p * product (replicate successes pSuccess) in p' : loop2 p' es
   (lb,ub) <- getBounds (_bisectStateCommits bisectState)
-  return $ array (lb,ub) [ (ix, p) | (ix, p) <- zip [lb..ub] $ loop1 $ zip cumulativeFailures $ map _bisectCommitSuccesses _elems ]
+  return $ array (lb,ub) [ (ix, p) | (ix, p) <- zip [lb..ub] $ loop1 $ zip cumulativeFailures $ map _bisectCommitSuccesses commits ]
 
 logAndPrint :: Handle -> String -> IO ()
 logAndPrint h msg = do
