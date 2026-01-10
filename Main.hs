@@ -168,7 +168,7 @@ getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
 getPosteriorDistribution bisectState = do
   commits <- getElems (_bisectStateCommits bisectState)
   let pEstimateLoop1 :: [BisectCommitState] -> Double
-      pEstimateLoop1 [] = 0.9
+      pEstimateLoop1 [] = 0.0 -- start with plain binary search
       pEstimateLoop1 (BisectCommitState{..}:bcs) =
         if _bisectCommitFailures > 0
           then pEstimateLoop2 _bisectCommitSuccesses _bisectCommitFailures bcs
