@@ -146,11 +146,11 @@ runBayesianBisection bisectState args = do
           writeBisectState bisectState
       distribution <- getPosteriorDistribution bisectState
       let total = sum $ elems distribution
-          cumulativeDistribution = scanl (+) 0.0 $ elems distribution
+          cumulativeDistribution = drop 1 $ scanl (+) 0.0 $ elems distribution
       (_,ub) <- getBounds (_bisectStateCommits bisectState)
       let target = total / 2.0
       let proposedCommitIndex = min ub $ length $ filter (<target) cumulativeDistribution
-          proposedKnownBad = all (==0.0) $ take (proposedCommitIndex + 1) cumulativeDistribution
+          proposedKnownBad = all (==0.0) $ take proposedCommitIndex cumulativeDistribution
       commitIndex <- if proposedKnownBad && proposedCommitIndex < ub
         then do
           proposedRuns <- (\BisectCommitState{..} -> _bisectCommitSuccesses + _bisectCommitFailures) <$> readArray (_bisectStateCommits bisectState) proposedCommitIndex
@@ -160,7 +160,7 @@ runBayesianBisection bisectState args = do
       bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
-      let knownBad = all (==0.0) $ take (commitIndex + 1) cumulativeDistribution
+      let knownBad = all (==0.0) $ take commitIndex cumulativeDistribution
       return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ ": "
 
 getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
