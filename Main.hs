@@ -5,6 +5,8 @@
 
 module Main where
 
+import Help
+
 import Control.Monad
 import Control.Monad.Trans.Resource
 import Data.Aeson
@@ -100,23 +102,25 @@ loadBisectState candidateCommits = do
 main :: IO ()
 main = do
   args <- getArgs
-
-  hasBisectCandidates <- doesFileExist bisectCandidatesFile
-  if hasBisectCandidates
-    then do
-      putStrLn $ "running Bayesian bisection using " ++ bisectCandidatesFile ++ " and " ++ bisectHistoryFile
-      commits <- runResourceT $ sourceToList
-        $  sourceFile bisectCandidatesFile
-        .| DCC.linesUnboundedAscii
-        .| DCC.map (B.takeWhile (/= 0x20))
-        .| DCC.filter ((== 40) . B.length)
-        .| DCC.map (T.unpack . T.decodeUtf8)
-      bisectState <- loadBisectState commits
-      runBayesianBisection bisectState args
+  if null args
+    then showHelp
     else do
-      commitSelector <- makeCommitSelector
-      _ <- logRunUntilFailure commitSelector args
-      return ()
+      hasBisectCandidates <- doesFileExist bisectCandidatesFile
+      if hasBisectCandidates
+        then do
+          putStrLn $ "running Bayesian bisection using " ++ bisectCandidatesFile ++ " and " ++ bisectHistoryFile
+          commits <- runResourceT $ sourceToList
+            $  sourceFile bisectCandidatesFile
+            .| DCC.linesUnboundedAscii
+            .| DCC.map (B.takeWhile (/= 0x20))
+            .| DCC.filter ((== 40) . B.length)
+            .| DCC.map (T.unpack . T.decodeUtf8)
+          bisectState <- loadBisectState commits
+          runBayesianBisection bisectState args
+        else do
+          commitSelector <- makeCommitSelector
+          _ <- logRunUntilFailure commitSelector args
+          return ()
 
 -- implements https://davecturner.github.io/2024/11/11/bayesian-bisection.html except:
 -- keeps trying known-bad commit to get a better sense of failure rate, but only if

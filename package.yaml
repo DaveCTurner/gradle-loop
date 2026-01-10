@@ -17,9 +17,11 @@ dependencies:
 - conduit-extra
 - containers
 - directory
+- ghc-prim
 - iso8601-time
 - process
 - resourcet
+- template-haskell
 - text
 - time
 
@@ -28,6 +30,9 @@ ghc-options: -Wall -Werror
 executables:
   gradle-loop:
     main:                Main.hs
+    other-modules:
+      - Help
+      - HelpTemplate
     ghc-options:
     - -threaded
     - -rtsopts

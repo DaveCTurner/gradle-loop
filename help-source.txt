@@ -1,0 +1,58 @@
+gradle-loop - Run `./gradlew ${args}` repeatedly, to help with potentially-flaky tests.
+
+Example invocation:
+
+    gradle-loop :server:test --tests 'org.elasticsearch.example.ExampleTests.testFlaky'
+
+By default, keeps re-running Gradle until the first failure.
+
+The output from the failure is captured in the files
+test-output-stdout.txt and test-output-stderr.txt
+
+## Git branch tracking
+
+If the environment variable ${BRANCH} is set, before each run it will
+hard-reset the current branch to `origin/${BRANCH}`:
+
+    git reset --hard --recurse-submodules origin/${BRANCH}
+
+This allows you to modify the commit on which we are looping: update
+`origin/${BRANCH}` in the background e.g. with `git fetch origin` and
+the new commit will get picked up on the next iteration. For example:
+
+    export BRANCH=2026/01/10/example-test-branch
+    git checkout ${BRANCH}
+
+## Stress-testing
+
+If the environment variable ${GRADLE_LOOP_STRESSOR} is set, its value is
+executed as a shell command in parallel with each iteration. For example:
+
+    export GRADLE_LOOP_STRESSOR='stress-ng --cpu 16'
+
+This is often a good way to expose flakiness due to rare race conditions,
+because if the CPUs are otherwise stressed then tasks will be scheduled
+in more unusual orders.
+
+If the underlying Git commit changes between runs, the first iteration with
+the new commit does not run with the stressor. This makes it faster to
+complete all the one-time activities that happen on a fresh commit, such
+as compilation.
+
+## Preclean
+
+If the environment variable ${GRADLE_LOOP_PRECLEAN} is set, its value is
+executed as a shell command before each iteration. For example:
+
+    export GRADLE_LOOP_PRECLEAN='rm -rvf modules/project/build/testrun/javaRestTest/temp'
+
+## Bisection
+
+If the file `gradle-loop-bisect-candidates.txt` is present, its contents
+are expected to be a list of Git commits, formatted as `git log --pretty=oneline`,
+which need to be searched by bisection. TODO more details here.
+
+bisectCandidatesFile = "gradle-loop-bisect-candidates.txt"
+
+bisectHistoryFile = "gradle-loop-bisect-history.json"
+
