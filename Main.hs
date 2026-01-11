@@ -164,9 +164,11 @@ runBayesianBisection bisectState args = do
                 proposedKnownBad = all (==0.0) $ take proposedCommitIndex cumulativeDistribution
             commitIndex <- if proposedKnownBad && proposedCommitIndex < ub
               then do
-                proposedRuns <- (\BisectCommitState{..} -> _bisectCommitSuccesses + _bisectCommitFailures) <$> readArray (_bisectStateCommits bisectState) proposedCommitIndex
-                otherRuns <- (sum . drop (proposedCommitIndex + 1) . map _bisectCommitSuccesses) <$> getElems (_bisectStateCommits bisectState)
-                return $ if div otherRuns 10 <= div proposedRuns 10 then proposedCommitIndex + 1 else proposedCommitIndex
+                let getRunCount :: Int -> IO Int
+                    getRunCount i = (\BisectCommitState{..} -> _bisectCommitSuccesses + _bisectCommitFailures) <$> readArray (_bisectStateCommits bisectState) i
+                proposedRuns     <- getRunCount  proposedCommitIndex
+                proposedNextRuns <- getRunCount (proposedCommitIndex+1)
+                return $ if div proposedNextRuns 10 <= div proposedRuns 10 then proposedCommitIndex+1 else proposedCommitIndex
               else return proposedCommitIndex
             let knownBad = all (==0.0) $ take commitIndex cumulativeDistribution
             return (commitIndex, knownBad)
