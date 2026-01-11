@@ -1,3 +1,4 @@
 .stack-work/
 gradle-loop.cabal
 *~
+.DS_Store
