@@ -6,53 +6,65 @@ Example invocation:
 
 By default, keeps re-running Gradle until the first failure.
 
-The output from the failure is captured in the files
-test-output-stdout.txt and test-output-stderr.txt
+The output from the failure is captured in the files `test-output-stdout.txt`
+and `test-output-stderr.txt`.
 
 ## Git branch tracking
 
-If the environment variable ${BRANCH} is set, before each run it will
+If the environment variable `${BRANCH}` is set, before each run it will
 hard-reset the current branch to `origin/${BRANCH}`:
 
     git reset --hard --recurse-submodules origin/${BRANCH}
 
 This allows you to modify the commit on which we are looping: update
-`origin/${BRANCH}` in the background e.g. with `git fetch origin` and
-the new commit will get picked up on the next iteration. For example:
+`origin/${BRANCH}` in the background e.g. with `git fetch origin` and the new
+commit will get picked up on the next iteration. For example:
 
     export BRANCH=2026/01/10/example-test-branch
     git checkout ${BRANCH}
 
 ## Stress-testing
 
-If the environment variable ${GRADLE_LOOP_STRESSOR} is set, its value is
+If the environment variable `${GRADLE_LOOP_STRESSOR}` is set, its value is
 executed as a shell command in parallel with each iteration. For example:
 
     export GRADLE_LOOP_STRESSOR='stress-ng --cpu 16'
 
 This is often a good way to expose flakiness due to rare race conditions,
-because if the CPUs are otherwise stressed then tasks will be scheduled
-in more unusual orders.
+because if the CPUs are otherwise stressed then tasks will be scheduled in more
+unusual orders.
 
-If the underlying Git commit changes between runs, the first iteration with
-the new commit does not run with the stressor. This makes it faster to
-complete all the one-time activities that happen on a fresh commit, such
-as compilation.
+If the underlying Git commit changes between runs, the first iteration with the
+new commit does not run with the stressor. This makes it faster to complete all
+the one-time activities that happen on a fresh commit, such as compilation.
 
 ## Preclean
 
-If the environment variable ${GRADLE_LOOP_PRECLEAN} is set, its value is
+If the environment variable `${GRADLE_LOOP_PRECLEAN}` is set, its value is
 executed as a shell command before each iteration. For example:
 
     export GRADLE_LOOP_PRECLEAN='rm -rvf modules/project/build/testrun/javaRestTest/temp'
 
 ## Bisection
 
-If the file `gradle-loop-bisect-candidates.txt` is present, its contents
-are expected to be a list of Git commits, formatted as `git log --pretty=oneline`,
-which need to be searched by bisection. TODO more details here.
+If the file `gradle-loop-bisect-candidates.txt` is present, its contents are
+expected to be a list of Git commits, formatted as `git log --pretty=oneline`,
+which need to be searched by bisection for the first "bad" commit, i.e. the
+first commit on which the Gradle invocation fails. Unlike regular `git bisect`
+this does not expect the failure to occur every time, even on a bad commit, and
+correctly handles rare failures of flaky tests using a Bayesian model for the
+probability distribution of the first bad commit based on the overall history
+of failures.
 
-bisectCandidatesFile = "gradle-loop-bisect-candidates.txt"
+The history is stored in the file `gradle-loop-bisect-history.json` and
+persists across restarts.
 
-bisectHistoryFile = "gradle-loop-bisect-history.json"
+The command keeps running, trying different commits, until it is cancelled by
+the user. On each iteration it chooses the median commit according to the
+posterior probability distribution computed from the history, using the ratio
+of successes and failures amongst the known-bad commits found so far as an
+estimate for the actual flakiness probability of the test.
 
+If allowed to run for long enough, it will eventually end up running ten
+attempts in a row on the first bad commit, followed by ten attempts in a row on
+its parent commit.
