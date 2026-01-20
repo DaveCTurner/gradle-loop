@@ -171,7 +171,7 @@ runBayesianBisection bisectState args = do
                 return $ if div proposedNextRuns 10 <= div proposedRuns 10 then proposedCommitIndex+1 else proposedCommitIndex
               else return proposedCommitIndex
             let knownBad = all (==0.0) $ take commitIndex cumulativeDistribution
-                pFirstBad = show ((distribution ! commitIndex) / total)
+                pFirstBad = (distribution ! commitIndex) / total
             return (commitIndex, knownBad, show pFirstBad)
 
       bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
