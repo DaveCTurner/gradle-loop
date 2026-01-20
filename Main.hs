@@ -177,7 +177,7 @@ runBayesianBisection bisectState args = do
       bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
-      return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ " P=" ++ pFirstBad ++ ": "
+      return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ " [P=" ++ pFirstBad ++ "]: "
 
 getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
 getPosteriorDistribution bisectState = do
