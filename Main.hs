@@ -150,7 +150,7 @@ runBayesianBisection bisectState args = do
           modifyArray (_bisectStateCommits bisectState) (_bisectCommitIndex currentCommit) (\bcs@BisectCommitState{..} -> bcs {_bisectCommitSuccesses = _bisectCommitSuccesses + 1})
           writeBisectState bisectState
 
-      (commitIndex, knownBad, pFirstBad) <- do
+      (commitIndex, knownBad, pNotFirstBad) <- do
         failureCount <- sum <$> map (_bisectCommitFailures) <$> getElems (_bisectStateCommits bisectState)
         if failureCount == 0
           then return (0, False, "??")
@@ -170,14 +170,16 @@ runBayesianBisection bisectState args = do
                 proposedNextRuns <- getRunCount (proposedCommitIndex+1)
                 return $ if div proposedNextRuns 10 <= div proposedRuns 10 then proposedCommitIndex+1 else proposedCommitIndex
               else return proposedCommitIndex
-            let knownBad = all (==0.0) $ take commitIndex cumulativeDistribution
-                pFirstBad = (distribution ! commitIndex) / total
-            return (commitIndex, knownBad, show pFirstBad)
+            return
+              ( commitIndex
+              , all (==0.0) $ take commitIndex cumulativeDistribution
+              , printf "%.3e" $ (total - distribution ! commitIndex) / total
+              )
 
       bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
-      return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ " [P=" ++ pFirstBad ++ "]: "
+      return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ " [P=" ++ pNotFirstBad ++ "]: "
 
 getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
 getPosteriorDistribution bisectState = do
