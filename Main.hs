@@ -24,6 +24,7 @@ import System.Exit
 import System.IO
 import Text.Printf
 
+import qualified Data.Array as DA
 import qualified Data.Conduit.Combinators as DCC
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -109,7 +110,7 @@ main = do
       if hasBisectCandidates
         then do
           putStrLn $ "running Bayesian bisection using " ++ bisectCandidatesFile ++ " and " ++ bisectHistoryFile
-          commits <- runResourceT $ sourceToList
+          commits <- fmap reverse $ runResourceT $ sourceToList
             $  sourceFile bisectCandidatesFile
             .| DCC.linesUnboundedAscii
             .| DCC.map (B.takeWhile (/= 0x20))
@@ -150,59 +151,82 @@ runBayesianBisection bisectState args = do
           modifyArray (_bisectStateCommits bisectState) (_bisectCommitIndex currentCommit) (\bcs@BisectCommitState{..} -> bcs {_bisectCommitSuccesses = _bisectCommitSuccesses + 1})
           writeBisectState bisectState
 
-      (commitIndex, knownBad, pNotFirstBad) <- do
-        failureCount <- sum <$> map (_bisectCommitFailures) <$> getElems (_bisectStateCommits bisectState)
+      (bcs@BisectCommitState{..}, description) <- do
+        failureCount <- sum <$> map _bisectCommitFailures <$> getElems (_bisectStateCommits bisectState)
         if failureCount == 0
-          then return (0, False, "??")
-          else do
-            distribution <- getPosteriorDistribution bisectState
-            let total = sum $ elems distribution
-                cumulativeDistribution = drop 1 $ scanl (+) 0.0 $ elems distribution
+          then do
             (_,ub) <- getBounds (_bisectStateCommits bisectState)
-            let target = total / 2.0
-            let proposedCommitIndex = min ub $ length $ filter (<target) cumulativeDistribution
-                proposedKnownBad = all (==0.0) $ take proposedCommitIndex cumulativeDistribution
-            commitIndex <- if proposedKnownBad && proposedCommitIndex < ub
-              then do
-                let getRunCount :: Int -> IO Int
-                    getRunCount i = (\BisectCommitState{..} -> _bisectCommitSuccesses + _bisectCommitFailures) <$> readArray (_bisectStateCommits bisectState) i
-                proposedRuns     <- getRunCount  proposedCommitIndex
-                proposedNextRuns <- getRunCount (proposedCommitIndex+1)
-                return $ if div proposedNextRuns 10 <= div proposedRuns 10 then proposedCommitIndex+1 else proposedCommitIndex
-              else return proposedCommitIndex
-            return
-              ( commitIndex
-              , all (==0.0) $ take commitIndex cumulativeDistribution
-              , printf "%.3e" $ (total - distribution ! commitIndex) / total
-              )
+            c <- readArray (_bisectStateCommits bisectState) ub
+            return (c, "(initializing)")
+          else getMedianCommit bisectState
 
-      bcs@BisectCommitState{..} <- readArray (_bisectStateCommits bisectState) commitIndex
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
-      return $ "bisect index " ++ show commitIndex ++ (if knownBad then " (known-bad)" else "") ++ " [P=" ++ pNotFirstBad ++ "]: "
+      (_,ub) <- getBounds (_bisectStateCommits bisectState)
+      return $ "bisect index " ++ show (ub + 1 - _bisectCommitIndex) ++ " " ++ description ++ ": "
 
-getPosteriorDistribution :: BisectState -> IO (UArray Int Double)
-getPosteriorDistribution bisectState = do
+
+data PosteriorDistributionEntry = PosteriorDistributionEntry
+  { _pdeBisectCommitState      :: BisectCommitState
+  , _pdeIsBadCommit            :: Bool
+  , _pdeIsFirstBadCommit       :: Bool
+  , _pdeLaterBadSuccesses      :: Int
+  , _pdeLaterBadFailures       :: Int
+  , _pdeLikelihood             :: Double
+  , _pdeCumulativeLikelihood   :: Double
+  , _pdeLastSubmedianCommit    :: BisectCommitState
+  , _pdeFirstSupermedianCommit :: BisectCommitState
+  } deriving (Show, Eq)
+
+getMedianCommit :: BisectState -> IO (BisectCommitState, String)
+getMedianCommit bisectState = do
   commits <- getElems (_bisectStateCommits bisectState)
-  let pEstimateLoop1 :: [BisectCommitState] -> Double
-      pEstimateLoop1 [] = 0.0 -- start with plain binary search
-      pEstimateLoop1 (BisectCommitState{..}:bcs) =
-        if _bisectCommitFailures > 0
-          then pEstimateLoop2 _bisectCommitSuccesses _bisectCommitFailures bcs
-          else pEstimateLoop1 bcs
-      pEstimateLoop2 :: Int -> Int -> [BisectCommitState] -> Double
-      pEstimateLoop2 (!successAccr) (!failureAccr) [] = fromIntegral successAccr / (fromIntegral (successAccr + failureAccr))
-      pEstimateLoop2 (!successAccr) (!failureAccr) (BisectCommitState{..}:bcs) = pEstimateLoop2 (successAccr + _bisectCommitSuccesses) (failureAccr + _bisectCommitFailures) bcs
-      pSuccess :: Double
-      pSuccess = pEstimateLoop1 $ reverse commits
-
-  let cumulativeFailures  = drop 1 (scanr (+) 0 $ map _bisectCommitFailures commits)
-      loop1 [] = []
-      loop1 ((failuresAccr, _):es) = if failuresAccr > 0 then 0.0 : loop1 es else 1.0 : loop2 1.0 es
-      loop2 _ [] = []
-      loop2 p ((_,successes):es) = let p' = p * product (replicate successes pSuccess) in p' : loop2 p' es
   (lb,ub) <- getBounds (_bisectStateCommits bisectState)
-  return $ array (lb,ub) [ (ix, p) | (ix, p) <- zip [lb..ub] $ loop1 $ zip cumulativeFailures $ map _bisectCommitSuccesses commits ]
+  let pd = DA.array (lb,ub)
+        [ (ix, PosteriorDistributionEntry
+            { _pdeBisectCommitState      = bcs
+            , _pdeIsBadCommit            = isBadCommit
+            , _pdeIsFirstBadCommit       = isFirstBadCommit
+            , _pdeLaterBadSuccesses      = laterBadSuccesses
+            , _pdeLaterBadFailures       = laterBadFailures
+            , _pdeLikelihood             = likelihood
+            , _pdeCumulativeLikelihood   = cumulativeLikelihood
+            , _pdeLastSubmedianCommit    = if lb == ix || cumulativeLikelihood <= likelihoodTarget then bcs else _pdeLastSubmedianCommit    (pd ! (ix - 1))
+            , _pdeFirstSupermedianCommit = if ix == ub || likelihoodTarget <= cumulativeLikelihood then bcs else _pdeFirstSupermedianCommit (pd ! (ix + 1))
+            }
+          )
+        | bcs <- commits
+        , let ix                     = _bisectCommitIndex bcs
+              isBadCommit            = (0 < _bisectCommitFailures bcs) || (lb <  ix &&      _pdeIsBadCommit (pd ! (ix - 1)))
+              isFirstBadCommit       = _pdeIsBadCommit (pd ! ix)       && (lb == ix || not (_pdeIsBadCommit (pd ! (ix - 1))))
+              laterBadSuccesses      = (if ix == ub then 0 else _pdeLaterBadSuccesses (pd ! (ix + 1)))
+                                     + (if isBadCommit then _bisectCommitSuccesses bcs else 0)
+              laterBadFailures       = (if ix == ub then 0 else _pdeLaterBadFailures (pd ! (ix + 1)))
+                                     + (if isBadCommit then _bisectCommitFailures bcs else 0)
+              likelihood             = if isBadCommit then if isFirstBadCommit then 1.0 else 0.0
+                                       else product $ _pdeLikelihood (pd ! (ix + 1)) : replicate (_bisectCommitSuccesses bcs) pSuccess0
+              cumulativeLikelihood   = likelihood + if lb == ix then 0 else _pdeCumulativeLikelihood (pd ! (ix - 1))
+        ]
+      pdFirst  = pd ! lb
+      pSuccess0 = fromIntegral (_pdeLaterBadSuccesses pdFirst) / fromIntegral (_pdeLaterBadSuccesses pdFirst + _pdeLaterBadFailures pdFirst)
+      totalLikelihood  = _pdeCumulativeLikelihood (pd ! ub)
+      likelihoodTarget = totalLikelihood / 2
+      lastSubmedianCommit    = _pdeLastSubmedianCommit    (pd ! ub)
+      firstSupermedianCommit = _pdeFirstSupermedianCommit (pd ! lb)
+      medianCommit = if div (_bisectCommitSuccesses firstSupermedianCommit + _bisectCommitFailures firstSupermedianCommit) 10
+                      < div (_bisectCommitSuccesses lastSubmedianCommit    + _bisectCommitFailures lastSubmedianCommit)    10
+                     then firstSupermedianCommit else lastSubmedianCommit
+      medianCommitEntry = pd ! (_bisectCommitIndex medianCommit)
+
+  return
+      ( medianCommit
+      , if _pdeIsBadCommit medianCommitEntry
+          then "(" ++ show (_bisectCommitFailures medianCommit) ++ " failures in "
+              ++ show (_bisectCommitSuccesses medianCommit + _bisectCommitFailures medianCommit) ++ " runs, ¬P="
+              ++ printf "%.3e" ((totalLikelihood - _pdeLikelihood medianCommitEntry) / totalLikelihood)
+              ++ ")"
+          else "(" ++ show (_bisectCommitSuccesses medianCommit) ++ " passes)"
+      )
 
 logAndPrint :: Handle -> String -> IO ()
 logAndPrint h msg = do
