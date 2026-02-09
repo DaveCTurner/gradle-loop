@@ -100,6 +100,8 @@ loadBisectState candidateCommits = do
           ]
     <*> newIORef Nothing
 
+type CommitSelector = (String -> IO ()) -> IO String
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -143,7 +145,7 @@ runBayesianBisection bisectState args = do
           runBayesianBisection bisectState args
 
   where
-    commitSelector = do
+    commitSelector writeLog = do
       maybeCurrentCommit <- readIORef (_bisectCurrentCommit bisectState)
       case maybeCurrentCommit of
         Nothing -> return ()
@@ -158,7 +160,7 @@ runBayesianBisection bisectState args = do
             (_,ub) <- getBounds (_bisectStateCommits bisectState)
             c <- readArray (_bisectStateCommits bisectState) ub
             return (c, "(initializing)")
-          else getMedianCommit bisectState
+          else getMedianCommit writeLog bisectState
 
       resetGitBranch _bisectCommit
       writeIORef (_bisectCurrentCommit bisectState) $ Just bcs
@@ -176,10 +178,11 @@ data PosteriorDistributionEntry = PosteriorDistributionEntry
   , _pdeCumulativeLikelihood   :: Double
   , _pdeLastSubmedianCommit    :: BisectCommitState
   , _pdeFirstSupermedianCommit :: BisectCommitState
+  , _pdeFirstBadCommit         :: BisectCommitState
   } deriving (Show, Eq)
 
-getMedianCommit :: BisectState -> IO (BisectCommitState, String)
-getMedianCommit bisectState = do
+getMedianCommit :: (String -> IO ()) -> BisectState -> IO (BisectCommitState, String)
+getMedianCommit writeLog bisectState = do
   commits <- getElems (_bisectStateCommits bisectState)
   (lb,ub) <- getBounds (_bisectStateCommits bisectState)
   let pd = DA.array (lb,ub)
@@ -187,6 +190,7 @@ getMedianCommit bisectState = do
             { _pdeBisectCommitState      = bcs
             , _pdeIsBadCommit            = isBadCommit
             , _pdeIsFirstBadCommit       = isFirstBadCommit
+            , _pdeFirstBadCommit         = if ix == ub || isBadCommit then bcs else _pdeFirstBadCommit (pd ! (ix + 1))
             , _pdeLaterBadSuccesses      = laterBadSuccesses
             , _pdeLaterBadFailures       = laterBadFailures
             , _pdeLikelihood             = likelihood
@@ -217,6 +221,19 @@ getMedianCommit bisectState = do
                       < div (_bisectCommitSuccesses lastSubmedianCommit    + _bisectCommitFailures lastSubmedianCommit)    10
                      then firstSupermedianCommit else lastSubmedianCommit
       medianCommitEntry = pd ! (_bisectCommitIndex medianCommit)
+
+  writeLog $ let totalFailures     = sum [ _bisectCommitFailures  bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
+                 totalSuccesses    = sum [ _bisectCommitSuccesses bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
+                 totalRuns         = totalFailures + totalSuccesses
+                 knownBadSuccesses = _pdeLaterBadSuccesses pdFirst
+                 knownBadRuns      = totalFailures + knownBadSuccesses
+
+             in printf "bisect status: %d out of %d runs have failed, of which %d were on known-bad commits; failure rate %0.3f%%; first-bad commit is at index %d"
+                  totalFailures
+                  totalRuns
+                  knownBadRuns
+                  (fromIntegral totalFailures / fromIntegral knownBadRuns * 100.0 :: Double)
+                  (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
 
   return
       ( medianCommit
@@ -260,29 +277,29 @@ resetGitBranch rev = do
     ExitSuccess -> return ()
     _ -> error $ "failed: git reset --hard " ++ rev
 
-makeCommitSelector :: IO (IO String)
+makeCommitSelector :: IO CommitSelector
 makeCommitSelector = do
   maybeBranch <- lookupEnv "BRANCH"
   case maybeBranch of
-    Nothing -> return $ return ""
+    Nothing -> return $ const $ return ""
     Just branch -> do
       let rev = "origin/" ++ branch
           description = show rev ++ " = "
-      return $ do
+      return $ \_ -> do
         resetGitBranch rev
         return description
 
-logRunUntilFailure :: IO String -> [String] -> IO Int
+logRunUntilFailure :: CommitSelector -> [String] -> IO Int
 logRunUntilFailure commitSelector args = withFile "gradle-loop.log" AppendMode $ \hLog -> do
   hSetBuffering hLog LineBuffering
   runUntilFailure commitSelector (logAndPrint hLog) args
 
-runUntilFailure :: IO String -> (String -> IO ()) -> [String] -> IO Int
+runUntilFailure :: CommitSelector -> (String -> IO ()) -> [String] -> IO Int
 runUntilFailure commitSelector writeLog args = loop (0::Int) Nothing
   where
   loop iteration maybePreviousGitRevision = do
 
-    commitDescription <- commitSelector
+    commitDescription <- commitSelector writeLog
     gitRevision <- getGitRevision
     writeLog $ printf "[%4d] starting on %s%s with args %s" iteration commitDescription (show gitRevision) (show args)
 
