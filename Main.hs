@@ -241,7 +241,7 @@ getMedianCommit writeLog bisectState = do
           then "(" ++ show (_bisectCommitFailures medianCommit) ++ " failures in "
               ++ show (_bisectCommitSuccesses medianCommit + _bisectCommitFailures medianCommit) ++ " runs, ¬P="
               ++ (let notP = ((totalLikelihood - _pdeLikelihood medianCommitEntry) / totalLikelihood)
-                  in  if notP > 0.0101
+                  in  if notP > 0.00101
                          then printf "%0.2f%%" (notP * 100)
                          else printf "%0.3e" notP)
               ++ ")"
