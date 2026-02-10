@@ -228,12 +228,12 @@ getMedianCommit writeLog bisectState = do
                  knownBadSuccesses = _pdeLaterBadSuccesses pdFirst
                  knownBadRuns      = totalFailures + knownBadSuccesses
 
-             in printf "bisect status: %d out of %d runs have failed, of which %d were on known-bad commits; failure rate 1-in-%0.2f; first known-bad commit is at index %d"
-                  totalFailures
+             in printf "bisect status: %d runs completed, %d failures from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f"
                   totalRuns
+                  totalFailures
                   knownBadRuns
-                  (fromIntegral knownBadRuns / fromIntegral totalFailures :: Double)
                   (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
+                  (fromIntegral knownBadRuns / fromIntegral totalFailures :: Double)
 
   return
       ( medianCommit
