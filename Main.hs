@@ -239,13 +239,14 @@ getMedianCommit writeLog bisectState = do
       ( medianCommit
       , if _pdeIsBadCommit medianCommitEntry
           then "(" ++ show (_bisectCommitFailures medianCommit) ++ " failures in "
-              ++ show (_bisectCommitSuccesses medianCommit + _bisectCommitFailures medianCommit) ++ " runs, ¬P="
-              ++ (let notP = ((totalLikelihood - _pdeLikelihood medianCommitEntry) / totalLikelihood)
-                  in  if notP > 0.00101
-                         then printf "%0.2f%%" (notP * 100)
-                         else printf "%0.3e" notP)
+              ++ show (_bisectCommitSuccesses medianCommit + _bisectCommitFailures medianCommit) ++ " runs, ¬P = 1-in-"
+              ++ (let notPRecip = totalLikelihood / (totalLikelihood - _pdeLikelihood medianCommitEntry)
+                      -- 1/(1-P(first-bad)): the odds (e.g. 1-in-1000) that the current commit is _not_ the first bad commit
+                  in  if notPRecip < 10000
+                         then printf "%0.2f" notPRecip
+                         else printf "%0.3e" notPRecip)
               ++ ")"
-          else "(" ++ show (_bisectCommitSuccesses medianCommit) ++ " passes)"
+          else "(" ++ show (_bisectCommitSuccesses medianCommit) ++ " successes)"
       )
 
 logAndPrint :: Handle -> String -> IO ()
