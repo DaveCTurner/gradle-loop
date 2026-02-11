@@ -220,33 +220,35 @@ getMedianCommit writeLog bisectState = do
       medianCommit = if div (_bisectCommitSuccesses firstSupermedianCommit + _bisectCommitFailures firstSupermedianCommit) 10
                       < div (_bisectCommitSuccesses lastSubmedianCommit    + _bisectCommitFailures lastSubmedianCommit)    10
                      then firstSupermedianCommit else lastSubmedianCommit
-      medianCommitEntry = pd ! (_bisectCommitIndex medianCommit)
+      firstBadCommit = _pdeFirstBadCommit pdFirst
+      firstBadCommitEntry = pd ! (_bisectCommitIndex firstBadCommit)
 
   writeLog $ let totalFailures     = sum [ _bisectCommitFailures  bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
                  totalSuccesses    = sum [ _bisectCommitSuccesses bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
                  totalRuns         = totalFailures + totalSuccesses
                  knownBadSuccesses = _pdeLaterBadSuccesses pdFirst
                  knownBadRuns      = totalFailures + knownBadSuccesses
+                 notPRecipStr      = let notPRecip = totalLikelihood / (totalLikelihood - _pdeLikelihood firstBadCommitEntry)
+                      -- 1/(1-P(first-bad)): the odds (e.g. 1-in-1000) that the first known-bad commit is _not_ the first bad commit
+                   in  if notPRecip < 10000
+                         then printf "%0.2f" notPRecip
+                         else printf "%0.3e" notPRecip
 
-             in printf "bisect status: %d runs completed, %d failures from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f"
+             in printf "bisect status: %d runs completed, %d failures from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f; ¬P = 1-in-%s"
                   totalRuns
                   totalFailures
                   knownBadRuns
                   (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
                   (fromIntegral knownBadRuns / fromIntegral totalFailures :: Double)
-
+                  (notPRecipStr::String)
   return
       ( medianCommit
-      , if _pdeIsBadCommit medianCommitEntry
-          then "(" ++ show (_bisectCommitFailures medianCommit) ++ " failures in "
-              ++ show (_bisectCommitSuccesses medianCommit + _bisectCommitFailures medianCommit) ++ " runs, ¬P = 1-in-"
-              ++ (let notPRecip = totalLikelihood / (totalLikelihood - _pdeLikelihood medianCommitEntry)
-                      -- 1/(1-P(first-bad)): the odds (e.g. 1-in-1000) that the current commit is _not_ the first bad commit
-                  in  if notPRecip < 10000
-                         then printf "%0.2f" notPRecip
-                         else printf "%0.3e" notPRecip)
-              ++ ")"
-          else "(" ++ show (_bisectCommitSuccesses medianCommit) ++ " successes)"
+      , if 0 < _bisectCommitFailures medianCommit
+          then printf "(%d failures in %d runs)"
+                (_bisectCommitFailures medianCommit)
+                (_bisectCommitFailures medianCommit + _bisectCommitSuccesses medianCommit)
+          else printf "(%d successes)"
+                (_bisectCommitSuccesses medianCommit)
       )
 
 logAndPrint :: Handle -> String -> IO ()
