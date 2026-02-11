@@ -68,3 +68,16 @@ estimate for the actual flakiness probability of the test.
 If allowed to run for long enough, it will eventually end up running ten
 attempts in a row on the first bad commit, followed by ten attempts in a row on
 its parent commit.
+
+While it's running, it will print out a status line of the following form:
+
+    bisect status: 1234 runs completed, 5 failures from 432 on known-bad commits starting at 99; estimated failure rate 1-in-86.40; ¬P = 1-in-51.0
+
+This shows (in order) the total number of runs, the number of failures and the
+number of runs on commits known to be bad (i.e. they are on-or-after the first
+commit on which a failure has been observed), the ratio of failures to runs on
+these known-bad commits, and finally ¬P represents the odds that the first
+known-bad commit found so far is in fact _not_ really the first known-bad
+commit. Typically one would want to run the process until this becomes
+1-in-1000 or higher, representing a probability of over 99.9% that the first
+known-bad commit found is in fact the first bad commit.
