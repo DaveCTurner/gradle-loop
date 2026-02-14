@@ -246,7 +246,7 @@ getMedianCommit writeLog bisectState = do
                          then printf "%0.2f" notPRecip
                          else printf "%0.3e" notPRecip
              in printf "bisect status: %s completed, %s from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f; ¬P = 1-in-%s"
-                  (runsPhrase totalRuns)
+                  (runsPhrase    totalRuns)
                   (failurePhrase totalFailures)
                   knownBadRuns
                   (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
@@ -254,11 +254,11 @@ getMedianCommit writeLog bisectState = do
                   (notPRecipStr::String)
   return
       ( medianCommit
-      , let totalFailures = _bisectCommitFailures medianCommit
-            totalRuns = totalFailures + _bisectCommitSuccesses medianCommit
+      , let totalFailures = _bisectCommitFailures  medianCommit
+            totalRuns     = _bisectCommitSuccesses medianCommit + totalFailures
         in if 0 < totalFailures
              then printf "(%s in %s)" (failurePhrase totalFailures) (runsPhrase totalRuns)
-             else printf "(%s)" (successPhrase totalRuns)
+             else printf "(%s)"       (successPhrase totalRuns)
       )
 
 logAndPrint :: Handle -> String -> IO ()
