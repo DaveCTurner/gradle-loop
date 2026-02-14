@@ -39,6 +39,18 @@ bisectCandidatesFile = "gradle-loop-bisect-candidates.txt"
 bisectHistoryFile :: FilePath
 bisectHistoryFile = "gradle-loop-bisect-history.json"
 
+countPhrase :: String -> String -> Int -> String
+countPhrase singular plural n = if n == 1 then "1 " ++ singular else show n ++ " " ++ plural
+
+failurePhrase :: Int -> String
+failurePhrase = countPhrase "failure" "failures"
+
+runsPhrase :: Int -> String
+runsPhrase = countPhrase "run" "runs"
+
+successPhrase :: Int -> String
+successPhrase = countPhrase "success" "successes"
+
 data BisectHistoryEntry = BisectHistoryEntry
   { _bisectHistoryEntryCommit    :: String
   , _bisectHistoryEntrySuccesses :: Int
@@ -233,22 +245,20 @@ getMedianCommit writeLog bisectState = do
                    in  if notPRecip < 10000
                          then printf "%0.2f" notPRecip
                          else printf "%0.3e" notPRecip
-
-             in printf "bisect status: %d runs completed, %d failures from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f; ¬P = 1-in-%s"
-                  totalRuns
-                  totalFailures
+             in printf "bisect status: %s completed, %s from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f; ¬P = 1-in-%s"
+                  (runsPhrase totalRuns)
+                  (failurePhrase totalFailures)
                   knownBadRuns
                   (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
                   (fromIntegral knownBadRuns / fromIntegral totalFailures :: Double)
                   (notPRecipStr::String)
   return
       ( medianCommit
-      , if 0 < _bisectCommitFailures medianCommit
-          then printf "(%d failures in %d runs)"
-                (_bisectCommitFailures medianCommit)
-                (_bisectCommitFailures medianCommit + _bisectCommitSuccesses medianCommit)
-          else printf "(%d successes)"
-                (_bisectCommitSuccesses medianCommit)
+      , let totalFailures = _bisectCommitFailures medianCommit
+            totalRuns = totalFailures + _bisectCommitSuccesses medianCommit
+        in if 0 < totalFailures
+             then printf "(%s in %s)" (failurePhrase totalFailures) (runsPhrase totalRuns)
+             else printf "(%s)" (successPhrase totalRuns)
       )
 
 logAndPrint :: Handle -> String -> IO ()
