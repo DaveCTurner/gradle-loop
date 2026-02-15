@@ -235,22 +235,25 @@ getMedianCommit writeLog bisectState = do
       firstBadCommit = _pdeFirstBadCommit pdFirst
       firstBadCommitEntry = pd ! (_bisectCommitIndex firstBadCommit)
 
-  writeLog $ let totalFailures     = sum [ _bisectCommitFailures  bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
-                 totalSuccesses    = sum [ _bisectCommitSuccesses bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
-                 totalRuns         = totalFailures + totalSuccesses
-                 knownBadSuccesses = _pdeLaterBadSuccesses pdFirst
-                 knownBadRuns      = totalFailures + knownBadSuccesses
-                 notPRecipStr      = let notPRecip = totalLikelihood / (totalLikelihood - _pdeLikelihood firstBadCommitEntry)
+  writeLog $ let totalFailures            = sum [ _bisectCommitFailures  bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
+                 totalSuccesses           = sum [ _bisectCommitSuccesses bcs | v <- DA.elems pd, let bcs = _pdeBisectCommitState v ]
+                 totalRuns                = totalFailures + totalSuccesses
+                 knownBadSuccesses        = _pdeLaterBadSuccesses pdFirst
+                 knownBadRuns             = totalFailures + knownBadSuccesses
+                 firstKnownBadCommitIndex = ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst)
+                 notPRecipStr             = let notPRecip = totalLikelihood / (totalLikelihood - _pdeLikelihood firstBadCommitEntry)
+
                       -- 1/(1-P(first-bad)): the odds (e.g. 1-in-1000) that the first known-bad commit is _not_ the first bad commit
                    in  if notPRecip < 10000
                          then printf "%0.2f" notPRecip
                          else printf "%0.3e" notPRecip
-             in printf "bisect status: %s completed, %s from %d on known-bad commits starting at %d; estimated failure rate 1-in-%0.2f; ¬P = 1-in-%s"
+             in printf "bisect status: %s; %s from %d on known-bad commits starting at %d; 1 failure per ~%0.2f runs; P(commit %d bad) = 1-in-%s"
                   (runsPhrase    totalRuns)
                   (failurePhrase totalFailures)
                   knownBadRuns
-                  (ub + 1 - _bisectCommitIndex (_pdeFirstBadCommit pdFirst))
+                  firstKnownBadCommitIndex
                   (fromIntegral knownBadRuns / fromIntegral totalFailures :: Double)
+                  (firstKnownBadCommitIndex + 1)
                   (notPRecipStr::String)
   return
       ( medianCommit
